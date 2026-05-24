@@ -1,0 +1,54 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout') {
+            steps {
+                sh '''
+                echo "Cloning repository..."
+                echo "Checkout successful"
+                '''
+            }
+        }
+        stage('Build & Push Image') {
+            steps {
+                sh '''
+                echo "Building Docker image myapp:v2.1.0..."
+                echo "Successfully built image myapp:v2.1.0"
+                echo "Pushing to registry.internal/myapp:v2.1.0..."
+                echo "Push successful"
+                '''
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                echo "Applying Kubernetes manifests..."
+                echo "kubectl apply -f deployment.yaml"
+                echo "deployment.apps/myapp configured"
+                echo "Waiting for rollout..."
+                echo "Waiting for deployment myapp rollout to finish: 1 out of 3 new replicas have been updated..."
+                echo "error: deployment myapp exceeded its progress deadline"
+                echo "ERROR: Readiness probe failed: HTTP probe failed with statuscode: 500"
+                echo "ERROR: Back-off restarting failed container myapp in pod myapp-7d9f8b-xk2pq"
+                echo "FATAL: Deployment rollout failed. Rolling back to previous version..."
+                echo "error: failed to rollback deployment myapp"
+                exit 1
+                '''
+            }
+        }
+    }
+    post {
+        failure {
+            echo "Pipeline failed! Triggering AI Error Analyzer..."
+            build job: 'ai-error-analyzer',
+                  wait: false,
+                  parameters: [
+                      string(name: 'FAILED_JOB_NAME',    value: env.JOB_NAME),
+                      string(name: 'FAILED_BUILD_NUMBER', value: env.BUILD_NUMBER)
+                  ]
+        }
+        success {
+            echo "Pipeline completed successfully ✅"
+        }
+    }
+}
