@@ -1,0 +1,54 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout') {
+            steps {
+                sh '''
+                echo "Cloning repository..."
+                echo "Branch: main"
+                echo "Commit: a3f9c12"
+                echo "Checkout successful"
+                '''
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                echo "Building Docker image..."
+                echo "Step 1/5 : FROM python:3.9-slim"
+                echo "Step 2/5 : WORKDIR /app"
+                echo "Step 3/5 : COPY requirements.txt ."
+                echo "Step 4/5 : RUN pip install -r requirements.txt"
+                echo "ERROR: Could not find a version that satisfies the requirement tensorflow==2.15.99 (from versions: 2.12.0, 2.13.0, 2.14.0, 2.15.0)"
+                echo "ERROR: No matching distribution found for tensorflow==2.15.99"
+                echo "The command RUN pip install -r requirements.txt returned a non-zero code: 1"
+                exit 1
+                '''
+            }
+        }
+        stage('Push to Registry') {
+            steps {
+                sh 'echo "This stage will never run"'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'echo "This stage will never run"'
+            }
+        }
+    }
+    post {
+        failure {
+            echo "Pipeline failed! Triggering AI Error Analyzer..."
+            build job: 'ai-error-analyzer',
+                  wait: false,
+                  parameters: [
+                      string(name: 'FAILED_JOB_NAME',    value: env.JOB_NAME),
+                      string(name: 'FAILED_BUILD_NUMBER', value: env.BUILD_NUMBER)
+                  ]
+        }
+        success {
+            echo "Pipeline completed successfully ✅"
+        }
+    }
+}
