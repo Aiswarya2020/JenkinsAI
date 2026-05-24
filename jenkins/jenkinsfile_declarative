@@ -1,0 +1,117 @@
+pipeline {
+    agent any
+    environment {
+        OLLAMA_URL       = "http://ollama:11434"
+        MODEL            = "jenkins-expert"   // ✅ changed from tinyllama
+        JENKINS_BASE_URL = "http://172.18.0.3:8080"
+        JENKINS_USER     = "root"
+    }
+    parameters {
+        string(name: 'FAILED_JOB_NAME',     defaultValue: '', description: 'Failed job name')
+        string(name: 'FAILED_BUILD_NUMBER', defaultValue: '', description: 'Failed build number')
+    }
+    stages {
+        stage('Fetch Console Log') {
+            steps {
+                withCredentials([string(credentialsId: 'jenkins_token', variable: 'JENKINS_TOKEN')]) {
+                    script {
+                        def jobName     = params.FAILED_JOB_NAME
+                        def buildNumber = params.FAILED_BUILD_NUMBER
+
+                        echo "Fetching console log for ${jobName} #${buildNumber}..."
+
+                        def consoleLog = sh(
+                            script: '''
+                            curl -s -u root:$JENKINS_TOKEN \
+                            http://172.18.0.3:8080/job/$FAILED_JOB_NAME/$FAILED_BUILD_NUMBER/consoleText
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        echo "=== RAW PREVIEW ==="
+                        echo consoleLog.length() > 300 ? consoleLog.substring(0, 300) : consoleLog
+                        echo "==================="
+
+                        if (consoleLog.contains('<title>Error 401') || consoleLog.contains('<title>Error 403')) {
+                            error("Authentication failed! Got HTTP error page.")
+                        }
+
+                        def errorPatterns = [
+                            'error', 'failed', 'exception', 'fatal',
+                            'caused by', 'exit 1', 'no such', 'denied',
+                            'not found', 'timeout', 'refused', 'cannot',
+                            'unable to', 'stacktrace', 'aborting',
+                            'permission denied', 'connection refused',
+                            'out of memory', 'build failure'
+                        ]
+
+                        def errorLines = consoleLog.split('\n').findAll { line ->
+                            errorPatterns.any { pattern ->
+                                line.toLowerCase().contains(pattern)
+                            }
+                        }.join('\n')
+
+                        def trimmed = errorLines.length() > 1000
+                            ? errorLines.substring(0, 1000)
+                            : errorLines
+
+                        echo "=== Extracted Error Lines ==="
+                        echo trimmed
+                        echo "============================="
+
+                        env.EXTRACTED_ERRORS = trimmed
+                        env.FAILED_JOB       = jobName
+                        env.FAILED_BUILD     = buildNumber
+                    }
+                }
+            }
+        }
+
+        stage('Analyze with AI') {
+            steps {
+                script {
+                    def errors = env.EXTRACTED_ERRORS?.trim()
+
+                    if (!errors) {
+                        errors = "Pipeline failed but no specific error lines were captured."
+                    }
+
+                    def promptText = """You are a Jenkins DevOps expert. Analyze this Jenkins pipeline error and give: 1) What went wrong 2) Root cause 3) How to fix it. Be short and clear.
+
+Error Log:
+${errors}"""
+
+                    writeFile file: 'prompt.txt', text: promptText
+
+                    def rawResponse = sh(
+                        script: '''
+                        PROMPT=$(cat prompt.txt | tr '\\n' ' ' | sed 's/"/\\\\"/g')
+                        curl -s http://ollama:11434/api/generate \
+                          -H "Content-Type: application/json" \
+                          -d "{
+                            \\"model\\": \\"jenkins-expert\\",
+                            \\"prompt\\": \\"${PROMPT}\\",
+                            \\"stream\\": false
+                          }"
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    def parsed = new groovy.json.JsonSlurper().parseText(rawResponse)
+
+                    echo "============================================"
+                    echo "Job     : ${env.FAILED_JOB}"
+                    echo "Build   : #${env.FAILED_BUILD}"
+                    echo "--------------------------------------------"
+                    echo "AI Analysis:"
+                    echo "${parsed.response}"
+                    echo "============================================"
+                }
+            }
+        }
+    }
+    post {
+        success { echo "AI Analysis completed ✅" }
+        failure { echo "AI Analyzer itself failed ❌" }
+    }
+}
