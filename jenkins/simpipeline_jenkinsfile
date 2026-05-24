@@ -1,0 +1,51 @@
+pipeline {
+    agent any
+    stages {
+        stage('Build') {
+            steps {
+                sh '''
+                echo "Starting build process..."
+                echo "Compiling source files..."
+                echo "Resolving dependencies..."
+                echo "Build completed successfully"
+                '''
+            }
+        }
+        stage('Unit Test') {
+            steps {
+                sh '''
+                echo "Running unit tests..."
+                echo "Test 1 passed: UserService.login()"
+                echo "Test 2 passed: UserService.logout()"
+                echo "Test 3 FAILED: NullPointerException at UserService.java:42"
+                echo "ERROR: 1 test failed out of 3"
+                exit 1
+                '''
+            }
+        }
+        stage('Integration Test') {
+            steps {
+                sh 'echo "This stage will never run"'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'echo "This stage will never run"'
+            }
+        }
+    }
+    post {
+        failure {
+            echo "Pipeline failed! Triggering AI Error Analyzer..."
+            build job: 'ai-error-analyzer',
+                  wait: false,
+                  parameters: [
+                      string(name: 'FAILED_JOB_NAME',    value: env.JOB_NAME),
+                      string(name: 'FAILED_BUILD_NUMBER', value: env.BUILD_NUMBER)
+                  ]
+        }
+        success {
+            echo "Pipeline completed successfully ✅"
+        }
+    }
+}
